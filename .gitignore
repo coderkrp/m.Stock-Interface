@@ -9,3 +9,4 @@ __pycache__/*
 .gemini/*
 .venv/*
 logs/*
+docs/*
