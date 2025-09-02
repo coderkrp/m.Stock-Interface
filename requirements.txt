@@ -1,7 +1,26 @@
-fastapi
-uvicorn
-httpx
-python-dotenv
-pydantic
-pydantic-settings 
-mStock-TradingApi-A
+# Core framework
+fastapi==0.115.2
+starlette==0.37.2
+uvicorn[standard]==0.30.6
+
+# HTTP client
+httpx==0.27.2
+
+# Scheduling
+APScheduler==3.10.4
+
+# Settings / env management
+pydantic==2.9.2
+pydantic-settings==2.6.1
+python-dotenv==1.0.1
+
+# m.Stock SDK (Type-A APIs)
+mStock-TradingApi-A==0.1.1
+
+# Required crypto dependencies for m.Stock SDK
+pyopenssl==24.2.1
+cryptography==43.0.1
+service-identity==24.1.0
+
+# Optional extras
+websockets==12.0
