@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
-import interface
+from src.main import app
+from src.models import TOKENS
 import pytest
 from datetime import datetime, timezone
 import time
@@ -26,13 +27,13 @@ class TestAPIEndpoints:
         assert response.status_code == 200
         assert response.json()["message"] == "Session established"
         assert "data" in response.json()
-        assert interface.TOKENS.is_valid()
-        assert interface.TOKENS.access_token == "mock_access_token"
+        assert TOKENS.is_valid()
+        assert TOKENS.access_token == "mock_access_token"
 
     def test_place_order(self, client_with_mock_admin_token: TestClient):
         # Ensure a valid token is set for this test
-        interface.TOKENS.access_token = "mock_access_token"
-        interface.TOKENS.token_set_at = time.time() # Use current timestamp
+        TOKENS.access_token = "mock_access_token"
+        TOKENS.token_set_at = time.time() # Use current timestamp
 
         order_data = {
             "tradingsymbol": "SBIN",
@@ -48,16 +49,16 @@ class TestAPIEndpoints:
         assert response.json()["order_id"] == "mock_order_id"
 
     def test_get_orders(self, client_with_mock_admin_token: TestClient):
-        interface.TOKENS.access_token = "mock_access_token"
-        interface.TOKENS.token_set_at = time.time() # Use current timestamp
+        TOKENS.access_token = "mock_access_token"
+        TOKENS.token_set_at = time.time() # Use current timestamp
 
         response = client_with_mock_admin_token.get("/orders", headers={"X-Admin-Token": "test-admin-token"})
         assert response.status_code == 200
         assert "data" in response.json()
 
     def test_get_trades(self, client_with_mock_admin_token: TestClient):
-        interface.TOKENS.access_token = "mock_access_token"
-        interface.TOKENS.token_set_at = time.time() # Use current timestamp
+        TOKENS.access_token = "mock_access_token"
+        TOKENS.token_set_at = time.time() # Use current timestamp
 
         trade_history_data = {
             "fromDate": datetime(2024, 1, 1, 0, 0, 0, 0, tzinfo=timezone.utc), # Pass datetime object directly
@@ -68,8 +69,8 @@ class TestAPIEndpoints:
         assert "data" in response.json()
 
     def test_order_status(self, client_with_mock_admin_token: TestClient):
-        interface.TOKENS.access_token = "mock_access_token"
-        interface.TOKENS.token_set_at = time.time() # Use current timestamp
+        TOKENS.access_token = "mock_access_token"
+        TOKENS.token_set_at = time.time() # Use current timestamp
 
         order_status_data = {
             "order_id": "mock_order_id",
@@ -80,8 +81,8 @@ class TestAPIEndpoints:
         assert "data" in response.json()
 
     def test_get_ltp(self, client_with_mock_admin_token: TestClient):
-        interface.TOKENS.access_token = "mock_access_token"
-        interface.TOKENS.token_set_at = time.time() # Use current timestamp
+        TOKENS.access_token = "mock_access_token"
+        TOKENS.token_set_at = time.time() # Use current timestamp
 
         ltp_data = {
             "instruments": ["NSE:RELIANCE"]
@@ -91,8 +92,8 @@ class TestAPIEndpoints:
         assert "data" in response.json()
 
     def test_get_ohlc(self, client_with_mock_admin_token: TestClient):
-        interface.TOKENS.access_token = "mock_access_token"
-        interface.TOKENS.token_set_at = time.time() # Use current timestamp
+        TOKENS.access_token = "mock_access_token"
+        TOKENS.token_set_at = time.time() # Use current timestamp
 
         ohlc_data = {
             "instruments": ["NSE:INFY"]
@@ -102,8 +103,8 @@ class TestAPIEndpoints:
         assert "data" in response.json()
 
     def test_get_historical_chart(self, client_with_mock_admin_token: TestClient):
-        interface.TOKENS.access_token = "mock_access_token"
-        interface.TOKENS.token_set_at = time.time() # Use current timestamp
+        TOKENS.access_token = "mock_access_token"
+        TOKENS.token_set_at = time.time() # Use current timestamp
 
         historical_data = {
             "security_token": "12345",
@@ -116,16 +117,16 @@ class TestAPIEndpoints:
         assert "data" in response.json()
 
     def test_get_instruments(self, client_with_mock_admin_token: TestClient):
-        interface.TOKENS.access_token = "mock_access_token"
-        interface.TOKENS.token_set_at = time.time() # Use current timestamp
+        TOKENS.access_token = "mock_access_token"
+        TOKENS.token_set_at = time.time() # Use current timestamp
 
         response = client_with_mock_admin_token.get("/market/instruments", headers={"X-Admin-Token": "test-admin-token"})
         assert response.status_code == 200
         assert response.json()["message"] == "Instrument file saved"
 
     def test_loser_gainer(self, client_with_mock_admin_token: TestClient):
-        interface.TOKENS.access_token = "mock_access_token"
-        interface.TOKENS.token_set_at = time.time() # Use current timestamp
+        TOKENS.access_token = "mock_access_token"
+        TOKENS.token_set_at = time.time() # Use current timestamp
 
         loser_gainer_data = {
             "Exchange": "NSE",
