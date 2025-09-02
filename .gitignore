@@ -4,7 +4,6 @@
 instrument_scrip_master.csv
 mconnect.log
 mticker.log
-.bmad-core/*
 __pycache__/*
 .gemini/*
 .venv/*
