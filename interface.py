@@ -1,4 +1,22 @@
 from __future__ import annotations
+import os
+import hashlib
+import time
+import json
+import sys
+import csv
+from datetime import datetime
+from pathlib import Path
+from typing import Optional, List
+
+from fastapi import FastAPI, HTTPException, Depends, WebSocket, Header, Request, Query
+from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# --- Logging -------------------------------------------------------------------
+import logging
+from logging.handlers import TimedRotatingFileHandler
+
 """
 FastAPI backend for m.Stock (Mirae Asset, India)
 Type A Only Version
@@ -17,24 +35,6 @@ Security notes:
 - Never hardcode secrets. Use env vars or a secret manager.
 - This server exposes powerful account actions. Restrict access (authN/Z, IP allowlist, TLS).
 """
-
-import os
-import hashlib
-import time
-import json
-import sys
-import csv
-from datetime import datetime
-from pathlib import Path
-from typing import Optional, List
-
-from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect, Header, Request
-from pydantic import BaseModel, Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
-
-# --- Logging -------------------------------------------------------------------
-import logging
-from logging.handlers import TimedRotatingFileHandler
 
 LOG_DIR = Path("logs")
 LOG_DIR.mkdir(exist_ok=True)
@@ -229,11 +229,11 @@ async def auth_session(body: SessionRequest, _: None = Depends(require_admin)):
         TOKENS.token_set_at = time.time()
         TOKENS.save()
         # ✅ Set access token into global handler
-        # mconnect.set_access_token(access_token)
+        
         logger.info("New session established")
 
-        print(f"The token extracted by me: {access_token}")
-        print(f"The token sent by mconnect: {mconnect.access_token}")
+        logger.info(f"The token extracted by me: {access_token}")
+        logger.info(f"The token sent by mconnect: {mconnect.access_token}")
 
         return {"message": "Session established", "data": gen.get("data", gen)}
     except Exception as e:
@@ -264,9 +264,7 @@ class ModifyOrderRequest(BaseModel):
 class CancelOrderRequest(BaseModel):
     order_id: str
 
-class TradeHistoryRequest(BaseModel):
-    fromDate: datetime
-    toDate: datetime
+
 
 class OrderStatusRequest(BaseModel):
     order_id: str
@@ -362,14 +360,18 @@ async def get_orders(_: None = Depends(require_admin)):
 
 # --- Tradebook (Trades placed between 2 dates) ----------------------------------------------------
 @app.get("/trades")
-async def get_trades(body: TradeHistoryRequest, _: None = Depends(require_admin)):
+async def get_trades(
+    fromDate: datetime = Query(...),
+    toDate: datetime = Query(...),
+    _: None = Depends(require_admin)
+):
     if not TOKENS.is_valid():
         raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
     global mconnect
     try:
         resp = mconnect.get_trade_history(
-            _fromDate=body.fromDate,
-            _toDate=body.toDate
+            _fromDate=fromDate,
+            _toDate=toDate
         )
         return resp
     except Exception as e:
@@ -399,10 +401,8 @@ async def get_ltp(body: LTPRequest, _: None = Depends(require_admin)):
     global mconnect
     try:
         resp = mconnect.get_ltp(body.instruments)
-        print(f"Response received : {resp.json()}")
-        resp2 = mconnect.get_ltp(["NSE:ACC", "BSE:ACC"])
-        print(f"Hard Coded Response received : {resp2.json()}")
-        return resp.json() if hasattr(resp, "json") else resp
+        logger.info(f"Response received : {resp}")
+        return resp
     except Exception as e:
         logger.error("Fetching LTP failed", exc_info=e)
         raise HTTPException(status_code=400, detail="Could not fetch LTP")
@@ -415,7 +415,7 @@ async def get_ohlc(body: OHLCRequest, _: None = Depends(require_admin)):
     try:
         resp = mconnect.get_ohlc(body.instruments)
         return resp.json() if hasattr(resp, "json") else resp
-    except TokenException:
+    except Exception:
         TOKENS.clear()
         raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
     except Exception as e:

@@ -23,4 +23,10 @@ cryptography==43.0.1
 service-identity==24.1.0
 
 # Optional extras
+# Optional extras
 websockets==12.0
+
+# Testing
+pytest
+slowapi
+
