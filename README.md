@@ -30,7 +30,6 @@ This application requires the following environment variables to be set for conn
 - `M_API_KEY`
 - `M_USERNAME`
 - `M_PASSWORD`
-- `M_API_SECRET`
 - `APP_ADMIN_TOKEN` (for internal API access control)
 
 It is recommended to use a `.env` file for managing these variables. A `.env.example` file might be provided in the project root.
@@ -45,7 +44,6 @@ This package provides a FastAPI backend. To run the server:
     M_API_KEY=your_api_key
     M_USERNAME=your_username
     M_PASSWORD=your_password
-    M_API_SECRET=your_api_secret
     APP_ADMIN_TOKEN=your_admin_token
     ```
 

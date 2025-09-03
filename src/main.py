@@ -163,7 +163,7 @@ async def auth_login(_: None = Depends(require_admin)):
 async def auth_session(body: SessionRequest, _: None = Depends(require_admin)):
     global mconnect
     try:
-        raw = f"{settings.M_API_KEY}{body.otp}{settings.M_API_SECRET}"
+        raw = f"{settings.M_API_KEY}{body.otp}"
         checksum = hashlib.sha256(raw.encode()).hexdigest()
         gen = mconnect.generate_session(settings.M_API_KEY, body.otp, checksum)
         if hasattr(gen, "json"):
