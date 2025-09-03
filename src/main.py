@@ -3,26 +3,31 @@ import hashlib
 import time
 import sys
 import csv
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, List
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Depends, WebSocket, Header, Request, Query
-from src.settings import settings
+from settings import settings
 
-from src.models import (
-    LoginResponse, SessionRequest, OrderRequest, ModifyOrderRequest,
-    CancelOrderRequest, OrderStatusRequest, LTPRequest, OHLCRequest,
-    HistoricalChartRequest, LoserGainerRequest, TokenCache, PersistentTokenCache
+from models import (
+    LoginResponse,
+    SessionRequest,
+    OrderRequest,
+    ModifyOrderRequest,
+    CancelOrderRequest,
+    OrderStatusRequest,
+    LTPRequest,
+    OHLCRequest,
+    HistoricalChartRequest,
+    LoserGainerRequest,
+    PersistentTokenCache,
 )
-from src.models import TOKENS
-
-import logging
-from logging.handlers import TimedRotatingFileHandler
 
 # --- Logging -------------------------------------------------------------------
 import logging
 from logging.handlers import TimedRotatingFileHandler
+import json
 
 """
 FastAPI backend for m.Stock (Mirae Asset, India)
@@ -36,7 +41,7 @@ Features:
 - Structured JSON logging (stdout + rotating file)
 
 Run:
-  uvicorn interface:app --reload --port 8080
+  uvicorn src.main:app --reload --port 8080
 
 Security notes:
 - Never hardcode secrets. Use env vars or a secret manager.
@@ -47,10 +52,11 @@ LOG_DIR = Path("logs")
 LOG_DIR.mkdir(exist_ok=True)
 LOG_FILE = LOG_DIR / "backend.log"
 
+
 class JsonFormatter(logging.Formatter):
     def format(self, record):
         log_entry = {
-            "ts": datetime.utcnow().isoformat(),
+            "ts": datetime.now(timezone.utc).isoformat(),
             "level": record.levelname,
             "event": record.name,
             "message": record.getMessage(),
@@ -67,6 +73,7 @@ class JsonFormatter(logging.Formatter):
             log_entry["duration_ms"] = record.duration_ms
         return json.dumps(log_entry)
 
+
 console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setFormatter(JsonFormatter())
 
@@ -82,11 +89,10 @@ logger.addHandler(file_handler)
 logger.propagate = False
 
 
-
 # --- m.Stock SDK ---------------------------------------------------------------
 try:
     from tradingapi_a.mconnect import MConnect  # type: ignore
-    from tradingapi_a.mticker import MTicker   # type: ignore
+    from tradingapi_a.mticker import MTicker  # type: ignore
 except Exception as e:
     logger.error("Failed to import mStock SDK", exc_info=e)
     MConnect = None
@@ -96,55 +102,30 @@ except Exception as e:
 mconnect: MConnect | None = None
 
 # --- Persistent Token Cache ----------------------------------------------------
-TOKEN_FILE = Path(".tokens.json")
 
-class TokenCache(BaseModel):
-    access_token: Optional[str] = None
-    token_set_at: Optional[float] = None
+TOKENS = PersistentTokenCache()
 
-    def is_valid(self) -> bool:
-        if not self.access_token or not self.token_set_at:
-            return False
-        token_date = datetime.fromtimestamp(self.token_set_at).date()
-        return token_date == datetime.now().date()
-    
-    def get_token(self) -> str:
-        return self.access_token
-
-class PersistentTokenCache(TokenCache):
-    def load(self):
-        if TOKEN_FILE.exists():
-            try:
-                data = json.loads(TOKEN_FILE.read_text())
-                self.access_token = data.get("access_token")
-                self.token_set_at = data.get("token_set_at")
-                if not self.is_valid():
-                    self.clear()
-            except Exception as e:
-                logger.warning("Failed to load token cache", exc_info=e)
-
-    def save(self):
-        try:
-            TOKEN_FILE.write_text(json.dumps({
-                "access_token": self.access_token,
-                "token_set_at": self.token_set_at,
-            }))
-        except Exception as e:
-            logger.warning("Failed to persist token cache", exc_info=e)
-
-    def clear(self):
-        self.access_token = None
-        self.token_set_at = None
-        try:
-            if TOKEN_FILE.exists():
-                TOKEN_FILE.unlink()
-        except Exception as e:
-            logger.warning("Failed to delete token file", exc_info=e)
-
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global mconnect
+    if MConnect is None:
+        logger.error("mStock SDK not installed, cannot init MConnect")
+        yield
+        return
+    try:
+        mconnect = MConnect(api_key=settings.M_API_KEY)
+        if TOKENS.is_valid():
+            mconnect.set_access_token(TOKENS.get_token())
+            logger.info("MConnect initialized (with session)")
+        else:
+            logger.info("MConnect initialized (without session)")
+    except Exception as e:
+        logger.error("Failed to initialize MConnect", exc_info=e)
+    yield
 
 
 # --- FastAPI app ---------------------------------------------------------------
-app = FastAPI(title="m.Stock Backend API (Type A Only)", version="1.0.0")
+app = FastAPI(title="m.Stock Backend API (Type A Only)", version="1.0.0", lifespan=lifespan)
 
 # --- Middleware: Request Logging -----------------------------------------------
 @app.middleware("http")
@@ -168,30 +149,6 @@ def require_admin(x_admin_token: str = Header(..., alias="X-Admin-Token")):
     if x_admin_token != settings.APP_ADMIN_TOKEN:
         raise HTTPException(status_code=401, detail="Invalid admin token")
 
-@app.on_event("startup")
-async def init_mconnect():
-    global mconnect
-    if MConnect is None:
-        logger.error("mStock SDK not installed, cannot init MConnect")
-        return
-    try:
-        mconnect = MConnect(api_key=settings.M_API_KEY)
-        if(TOKENS.is_valid()):
-            mconnect.set_access_token(TOKENS.get_token())
-            logger.info("MConnect initialized (with session)")
-        else:
-            logger.info("MConnect initialized (without session)")
-    except Exception as e:
-        logger.error("Failed to initialize MConnect", exc_info=e)
-
-# --- Auth / Session ------------------------------------------------------------
-class LoginResponse(BaseModel):
-    message: str
-    note: str
-
-class SessionRequest(BaseModel):
-    otp: str
-
 @app.post("/auth/login", response_model=LoginResponse)
 async def auth_login(_: None = Depends(require_admin)):
     global mconnect
@@ -201,10 +158,14 @@ async def auth_login(_: None = Depends(require_admin)):
             login_resp = login_resp.json()
         if not login_resp or login_resp.get("status") != "success":
             raise HTTPException(status_code=401, detail=f"Login failed: {login_resp}")
-        return LoginResponse(message="OTP sent", note="Check your registered mobile/email, then call /auth/session with your OTP.")
+        return LoginResponse(
+            message="OTP sent",
+            note="Check your registered mobile/email, then call /auth/session with your OTP.",
+        )
     except Exception as e:
         logger.error("Auth login error", exc_info=e)
         raise HTTPException(status_code=500, detail=f"Auth error: {e}")
+
 
 @app.post("/auth/session")
 async def auth_session(body: SessionRequest, _: None = Depends(require_admin)):
@@ -215,16 +176,20 @@ async def auth_session(body: SessionRequest, _: None = Depends(require_admin)):
         gen = mconnect.generate_session(settings.M_API_KEY, body.otp, checksum)
         if hasattr(gen, "json"):
             gen = gen.json()
-        
-        access_token = gen.get("data", {}).get("access_token") or gen.get("access_token")
+
+        access_token = gen.get("data", {}).get("access_token") or gen.get(
+            "access_token"
+        )
         if not access_token:
-            raise HTTPException(status_code=500, detail=f"Failed to fetch access token: {gen}")
-        
+            raise HTTPException(
+                status_code=500, detail=f"Failed to fetch access token: {gen}"
+            )
+
         TOKENS.access_token = access_token
         TOKENS.token_set_at = time.time()
         TOKENS.save()
         # ✅ Set access token into global handler
-        
+
         logger.info("New session established")
 
         logger.info(f"The token extracted by me: {access_token}")
@@ -235,15 +200,16 @@ async def auth_session(body: SessionRequest, _: None = Depends(require_admin)):
         logger.error("Auth session error", exc_info=e)
         raise HTTPException(status_code=500, detail=f"Session error: {e}")
 
-# — Models
 
 # --- Place Orders --------------------------------------------------------------
 @app.post("/orders")
 async def place_order(body: OrderRequest, _: None = Depends(require_admin)):
     global mconnect
     if not TOKENS.is_valid():
-        raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
-    
+        raise HTTPException(
+            status_code=401, detail="Session expired. Please log in again."
+        )
+
     try:
         resp = mconnect.place_order(
             _tradingsymbol=body.tradingsymbol,
@@ -261,12 +227,15 @@ async def place_order(body: OrderRequest, _: None = Depends(require_admin)):
         logger.error("Order placement failed", exc_info=e)
         raise HTTPException(status_code=400, detail=f"Order failed: {e}")
 
+
 # --- Modify Pending Order ------------------------------------------------------
 @app.post("/orders/modify")
 async def modify_order(body: ModifyOrderRequest, _: None = Depends(require_admin)):
     global mconnect
     if not TOKENS.is_valid():
-        raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+        raise HTTPException(
+            status_code=401, detail="Session expired. Please log in again."
+        )
     try:
         resp = mconnect.modify_order(
             order_id=body.order_id,
@@ -275,19 +244,24 @@ async def modify_order(body: ModifyOrderRequest, _: None = Depends(require_admin
             _trigger_price=str(body.trigger_price) if body.trigger_price else None,
             _order_type=body.order_type,
             _validity=body.validity,
-            _disclosed_quantity=body.disclosed_quantity if body.disclosed_quantity else None
+            _disclosed_quantity=(
+                body.disclosed_quantity if body.disclosed_quantity else None
+            ),
         )
         return resp
     except Exception as e:
         logger.error("Order modification failed", exc_info=e)
         raise HTTPException(status_code=400, detail="Order modification failed")
 
+
 # --- Cancel Pending Order ------------------------------------------------------
 @app.post("/orders/cancel")
 async def cancel_order(body: CancelOrderRequest, _: None = Depends(require_admin)):
     global mconnect
     if not TOKENS.is_valid():
-        raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+        raise HTTPException(
+            status_code=401, detail="Session expired. Please log in again."
+        )
     try:
         resp = mconnect.cancel_all()
         return resp
@@ -295,11 +269,14 @@ async def cancel_order(body: CancelOrderRequest, _: None = Depends(require_admin
         logger.error("Order cancellation failed", exc_info=e)
         raise HTTPException(status_code=400, detail="Order cancellation failed")
 
+
 # --- Orderbook (all orders) ----------------------------------------------------
 @app.get("/orders")
 async def get_orders(_: None = Depends(require_admin)):
     if not TOKENS.is_valid():
-        raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+        raise HTTPException(
+            status_code=401, detail="Session expired. Please log in again."
+        )
     global mconnect
     try:
         resp = mconnect.get_order_book()
@@ -308,46 +285,51 @@ async def get_orders(_: None = Depends(require_admin)):
         logger.error("Fetching orderbook failed", exc_info=e)
         raise HTTPException(status_code=400, detail="Could not fetch orderbook")
 
+
 # --- Tradebook (Trades placed between 2 dates) ----------------------------------------------------
 @app.get("/trades")
 async def get_trades(
     fromDate: datetime = Query(...),
     toDate: datetime = Query(...),
-    _: None = Depends(require_admin)
+    _: None = Depends(require_admin),
 ):
     if not TOKENS.is_valid():
-        raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+        raise HTTPException(
+            status_code=401, detail="Session expired. Please log in again."
+        )
     global mconnect
     try:
-        resp = mconnect.get_trade_history(
-            _fromDate=fromDate,
-            _toDate=toDate
-        )
+        resp = mconnect.get_trade_history(_fromDate=fromDate, _toDate=toDate)
         return resp
     except Exception as e:
         logger.error("Fetching tradebook failed", exc_info=e)
         raise HTTPException(status_code=400, detail="Could not fetch tradebook")
 
+
 # --- Order Status (by ID) ------------------------------------------------------
 @app.post("/orders/status")
 async def order_status(body: OrderStatusRequest, _: None = Depends(require_admin)):
     if not TOKENS.is_valid():
-        raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+        raise HTTPException(
+            status_code=401, detail="Session expired. Please log in again."
+        )
     global mconnect
     try:
         resp = mconnect.get_order_details(
-            _order_id=body.order_id,
-            _segment=body.segment
-            )
+            _order_id=body.order_id, _segment=body.segment
+        )
         return resp
     except Exception as e:
         logger.error("Order status fetch failed", exc_info=e)
         raise HTTPException(status_code=400, detail="Could not fetch order status")
 
+
 @app.post("/market/ltp")
 async def get_ltp(body: LTPRequest, _: None = Depends(require_admin)):
     if not TOKENS.is_valid():
-        raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+        raise HTTPException(
+            status_code=401, detail="Session expired. Please log in again."
+        )
     global mconnect
     try:
         resp = mconnect.get_ltp(body.instruments)
@@ -356,6 +338,7 @@ async def get_ltp(body: LTPRequest, _: None = Depends(require_admin)):
     except Exception as e:
         logger.error("Fetching LTP failed", exc_info=e)
         raise HTTPException(status_code=400, detail="Could not fetch LTP")
+
 
 @app.post("/market/ohlc")
 async def get_ohlc(body: OHLCRequest, _: None = Depends(require_admin)):
@@ -367,13 +350,18 @@ async def get_ohlc(body: OHLCRequest, _: None = Depends(require_admin)):
         return resp.json() if hasattr(resp, "json") else resp
     except Exception:
         TOKENS.clear()
-        raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+        raise HTTPException(
+            status_code=401, detail="Session expired. Please log in again."
+        )
     except Exception as e:
         logger.error("Fetching OHLC failed", exc_info=e)
         raise HTTPException(status_code=400, detail="Could not fetch OHLC")
 
+
 @app.post("/market/historical")
-async def get_historical_chart(body: HistoricalChartRequest, _: None = Depends(require_admin)):
+async def get_historical_chart(
+    body: HistoricalChartRequest, _: None = Depends(require_admin)
+):
     if not TOKENS.is_valid():
         raise HTTPException(status_code=401, detail="Session expired")
     global mconnect
@@ -389,6 +377,7 @@ async def get_historical_chart(body: HistoricalChartRequest, _: None = Depends(r
         logger.error("Fetching historical chart failed", exc_info=e)
         raise HTTPException(status_code=400, detail="Could not fetch historical chart")
 
+
 @app.get("/market/instruments")
 async def get_instruments(_: None = Depends(require_admin)):
     if not TOKENS.is_valid():
@@ -398,17 +387,19 @@ async def get_instruments(_: None = Depends(require_admin)):
         resp = mconnect.get_instruments()
 
         # Decode bytes → str
-        text_data = resp.decode("utf-8") if isinstance(resp, (bytes, bytearray)) else str(resp)
+        text_data = (
+            resp.decode("utf-8") if isinstance(resp, (bytes, bytearray)) else str(resp)
+        )
 
         # Split lines and process CSV
-        split_data=text_data.split("\n")
-        data=[row.strip().split(",") for row in split_data]
-        
-        #Write csv file for reference
-        #Open the file in write mode
-        with open('instrument_scrip_master.csv', mode='w') as file:
+        split_data = text_data.split("\n")
+        data = [row.strip().split(",") for row in split_data]
+
+        # Write csv file for reference
+        # Open the file in write mode
+        with open("instrument_scrip_master.csv", mode="w") as file:
             # Create a csv.writer object
-            writer = csv.writer(file,delimiter=",")
+            writer = csv.writer(file, delimiter=",")
             # Write data to the CSV file
             for row in data:
                 writer.writerow(row)
@@ -417,6 +408,7 @@ async def get_instruments(_: None = Depends(require_admin)):
     except Exception as e:
         logger.error("Fetching instruments failed", exc_info=e)
         raise HTTPException(status_code=400, detail="Could not fetch instruments")
+
 
 @app.post("/market/loser_gainer")
 async def loser_gainer(body: LoserGainerRequest, _: None = Depends(require_admin)):
@@ -427,12 +419,13 @@ async def loser_gainer(body: LoserGainerRequest, _: None = Depends(require_admin
         resp = mconnect.loser_gainer(
             _Exchange=body.Exchange,
             _SecurityIdCode=body.SecurityIdCode,
-            _segment=body.segment
+            _segment=body.segment,
         )
         return resp.json() if hasattr(resp, "json") else resp
     except Exception as e:
         logger.error("Fetching losers/gainers failed", exc_info=e)
         raise HTTPException(status_code=400, detail="Could not fetch losers/gainers")
+
 
 # --- WebSocket Endpoints (Ticks / Orders) --------------------------------------
 active_tick_clients: list[WebSocket] = []
@@ -440,7 +433,8 @@ active_order_clients: list[WebSocket] = []
 
 # TODO: implement MTicker integration here for live streaming
 
+
 # --- Health --------------------------------------------------------------------
 @app.get("/healthz")
 async def healthz():
-    return {"ok": True, "ts": datetime.utcnow().isoformat()}
+    return {"ok": True, "ts": datetime.now(timezone.utc).isoformat()}

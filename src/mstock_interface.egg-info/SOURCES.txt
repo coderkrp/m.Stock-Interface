@@ -1,0 +1,7 @@
+pyproject.toml
+src/mstock_interface.egg-info/PKG-INFO
+src/mstock_interface.egg-info/SOURCES.txt
+src/mstock_interface.egg-info/dependency_links.txt
+src/mstock_interface.egg-info/requires.txt
+src/mstock_interface.egg-info/top_level.txt
+tests/test_main.py

@@ -1,0 +1,24 @@
+Metadata-Version: 2.4
+Name: mstock_interface
+Version: 0.1.0
+Summary: A Python interface for m.Stock.
+Author-email: Your Name <you@example.com>
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.11
+Requires-Dist: fastapi==0.115.2
+Requires-Dist: starlette==0.37.2
+Requires-Dist: uvicorn[standard]==0.30.6
+Requires-Dist: httpx==0.27.2
+Requires-Dist: APScheduler==3.10.4
+Requires-Dist: pydantic==2.9.2
+Requires-Dist: pydantic-settings==2.6.1
+Requires-Dist: python-dotenv==1.0.1
+Requires-Dist: mStock-TradingApi-A==0.1.1
+Requires-Dist: pyopenssl==24.2.1
+Requires-Dist: cryptography==43.0.1
+Requires-Dist: service-identity==24.1.0
+Requires-Dist: websockets==12.0
+Requires-Dist: pytest
+Requires-Dist: slowapi
