@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 from main import TOKENS
 from models import TokenCache, PersistentTokenCache
 import pytest
+import logging
 from datetime import datetime, timezone, timedelta
 import time
 from unittest.mock import patch
@@ -274,3 +275,49 @@ class TestAPIEndpoints:
         )
         assert response.status_code == 200
         assert "data" in response.json()
+
+
+    def test_throttle_rate_limit_exceeded(self, client_with_mock_admin_token: TestClient):
+        client_with_mock_admin_token.app.state.limiter.reset() # Explicit reset
+        # The default rate limit is 10 per minute.
+        # We will make 11 requests to trigger the rate limit.
+        # This test will take approximately 5 seconds to run.
+        for i in range(10):
+            response = client_with_mock_admin_token.get("/healthz")
+            assert response.status_code == 200
+            time.sleep(0.5) # Sleep for 0.5 seconds to ensure requests are spaced out
+
+        response = client_with_mock_admin_token.get("/healthz")
+        assert response.status_code == 429
+
+    def test_throttle_happy_path(self, client_with_mock_admin_token: TestClient):
+        client_with_mock_admin_token.app.state.limiter.reset() # Explicit reset
+        response = client_with_mock_admin_token.get("/healthz")
+        assert response.status_code == 200
+
+    def test_timing_logged(self, client_with_mock_admin_token: TestClient, caplog):
+        client_with_mock_admin_token.app.state.limiter.reset() # Explicit reset
+        
+        # Get the logger instance
+        import logging
+        app_logger = logging.getLogger("mstock-backend")
+        
+        # Temporarily set propagate to True
+        original_propagate = app_logger.propagate
+        app_logger.propagate = True
+        
+        try:
+            with caplog.at_level(logging.INFO):
+                response = client_with_mock_admin_token.get("/healthz")
+                assert response.status_code == 200
+                assert "X-Process-Time" in response.headers
+                
+                # Check log records
+                found_log = False
+                for record in caplog.records:
+                    if record.levelname == "INFO" and "Request execution time:" in record.message:
+                        found_log = True
+                        break
+                assert found_log
+        finally:
+            app_logger.propagate = original_propagate # Restore original propagate setting

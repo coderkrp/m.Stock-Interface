@@ -7,8 +7,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Depends, WebSocket, Header, Request, Query
+from fastapi import FastAPI, HTTPException, Depends, WebSocket, Header, Query
 from settings import settings
+from security import limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.middleware import SlowAPIMiddleware
+from security import ThrottlingMiddleware
 
 from models import (
     LoginResponse,
@@ -126,23 +131,10 @@ async def lifespan(app: FastAPI):
 
 # --- FastAPI app ---------------------------------------------------------------
 app = FastAPI(title="m.Stock Backend API (Type A Only)", version="1.0.0", lifespan=lifespan)
-
-# --- Middleware: Request Logging -----------------------------------------------
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    start_time = time.time()
-    response = await call_next(request)
-    process_time = (time.time() - start_time) * 1000
-    logger.info(
-        "HTTP Request",
-        extra={
-            "method": request.method,
-            "path": request.url.path,
-            "status_code": response.status_code,
-            "duration_ms": round(process_time, 2),
-        },
-    )
-    return response
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+app.add_middleware(ThrottlingMiddleware, logger=logger)
 
 # --- Admin Token Protection ----------------------------------------------------
 def require_admin(x_admin_token: str = Header(..., alias="X-Admin-Token")):
