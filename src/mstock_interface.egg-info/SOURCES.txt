@@ -1,3 +1,5 @@
+LICENSE.md
+README.md
 pyproject.toml
 src/mstock_interface.egg-info/PKG-INFO
 src/mstock_interface.egg-info/SOURCES.txt

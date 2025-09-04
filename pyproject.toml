@@ -6,15 +6,14 @@ build-backend = "setuptools.build_meta"
 name = "mstock_interface"
 version = "0.1.0"
 authors = [
-  { name="Your Name", email="you@example.com" },
+  { name="Karan Parikh", email="karan.parikh@stormsparkinnovations.com" },
 ]
-description = "A Python interface for m.Stock."
+description = "A Python interface for m.Stock (Mirae Asset) Broker's Type A api"
+readme = "README.md"
 requires-python = ">=3.11"
-classifiers = [
-    "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
-]
+license = Mozilla Public License, v2
+license-files = ["LICENSE.md"]
+keywords = ["m.stock", "mstock"]
 dependencies = [
     "fastapi==0.115.2",
     "starlette==0.37.2",
